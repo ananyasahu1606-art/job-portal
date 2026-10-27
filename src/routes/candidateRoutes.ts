@@ -13,7 +13,14 @@ import { protect, authorize } from "../middleware/authMiddleware";
 
 const router = Router();
 
-// 1. Export CSV (Placed before :id route to prevent collision)
+// 1. Export CSV (Must be placed before /:id routes to avoid route param collision)
+router.get(
+    "/export",
+    protect,
+    authorize("super-admin", "operations-admin"),
+    exportCandidatesCsv
+);
+
 router.get(
     "/export/csv",
     protect,
@@ -21,7 +28,7 @@ router.get(
     exportCandidatesCsv
 );
 
-// 2. Bulk Action on Candidates
+// 2. Bulk Action on Candidates (Placed before /:id)
 router.post(
     "/bulk-action",
     protect,
@@ -29,7 +36,7 @@ router.post(
     bulkCandidateAction
 );
 
-// 3. List candidates (with search, filters, pagination, and masked PII)
+// 3. Paginated Candidate Directory (with search, filtering, sorting, masked PII)
 router.get(
     "/",
     protect,
@@ -37,7 +44,7 @@ router.get(
     getCandidates
 );
 
-// 4. Candidate Details
+// 4. Candidate Details (PII masked by default)
 router.get(
     "/:id",
     protect,
@@ -45,7 +52,7 @@ router.get(
     getCandidateById
 );
 
-// 5. Unmask PII with mandatory DPDP Act justification
+// 5. Unmask PII with mandatory DPDP Act justification (min 8 chars, logged)
 router.post(
     "/:id/unmask-pii",
     protect,
@@ -53,7 +60,7 @@ router.post(
     unmaskCandidatePii
 );
 
-// 6. Update Candidate Status (Suspend / Reactivate)
+// 6. Update Candidate Status (Active, Suspended, Self-deactivated, etc.)
 router.patch(
     "/:id/status",
     protect,
@@ -61,7 +68,7 @@ router.patch(
     updateCandidateStatus
 );
 
-// 7. Force Verify Email
+// 7. Verify Candidate Email (force_verify, resend_link)
 router.post(
     "/:id/verify-email",
     protect,
@@ -69,7 +76,7 @@ router.post(
     verifyCandidateEmail
 );
 
-// 8. Add Casework Note
+// 8. Add Caseworker Note
 router.post(
     "/:id/notes",
     protect,

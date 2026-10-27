@@ -2,7 +2,6 @@ import mongoose, { Document, Model, Schema } from "mongoose";
 
 export type CandidateStatus =
     | "Active"
-    | "Pending"
     | "Suspended"
     | "Self-deactivated"
     | "Pending deletion"
@@ -13,12 +12,14 @@ export type CandidateSource = "Email" | "Google" | "LinkedIn" | "Apple";
 export interface ICandidateResume {
     filename: string;
     url: string;
-    uploadedAt: Date;
+    uploadedAt: Date | string;
     size: string;
     atsScore: number;
     templateId?: string;
     templateName?: string;
     isDefault: boolean;
+    summary?: string;
+    atsValidated?: boolean;
 }
 
 export interface ICandidateStaffNote {
@@ -42,10 +43,35 @@ export interface ICandidateEducation {
     year: string;
 }
 
+export interface ICandidateConsentRecord {
+    customId?: string;
+    purpose: string;
+    version: string;
+    consentedAt: Date | string;
+    ipAddress: string;
+    status: "Granted" | "Revoked";
+}
+
+export interface ICandidateOAuthAccount {
+    provider: string;
+    email: string;
+    linkedAt?: Date | string;
+    status: string;
+}
+
+export interface ICandidateLoginHistory {
+    id?: string;
+    timestamp?: Date | string;
+    ipAddress?: string;
+    device?: string;
+    location?: string;
+}
+
 export interface ICandidate extends Document {
     customId: string;
     name: string;
     headline: string;
+    summary?: string;
     email: string;
     phone?: string;
     location: string;
@@ -87,13 +113,7 @@ export interface ICandidate extends Document {
         pushChannel: boolean;
         smsChannel: boolean;
     };
-    consentRecords: Array<{
-        purpose: string;
-        version: string;
-        consentedAt: Date;
-        ipAddress: string;
-        status: "Granted" | "Revoked";
-    }>;
+    consentRecords: ICandidateConsentRecord[];
     privacySettings: {
         publicProfile: boolean;
         visibleToEmployers: boolean;
@@ -103,6 +123,8 @@ export interface ICandidate extends Document {
     };
     resumes: ICandidateResume[];
     staffNotes: ICandidateStaffNote[];
+    linkedOAuthAccounts?: ICandidateOAuthAccount[];
+    loginHistory?: ICandidateLoginHistory[];
     savedJobIds: string[];
     lastActive?: Date | string;
     createdAt: Date;
@@ -112,18 +134,24 @@ export interface ICandidate extends Document {
 
 export const CANDIDATE_STATUSES: CandidateStatus[] = [
     "Active",
-    "Pending",
     "Suspended",
     "Self-deactivated",
     "Pending deletion",
     "Anonymised",
 ];
 
+export const CANDIDATE_SOURCES: CandidateSource[] = [
+    "Email",
+    "Google",
+    "LinkedIn",
+    "Apple",
+];
+
 const candidateSchema = new Schema<ICandidate>(
     {
         customId: {
             type: String,
-            required: true,
+            required: [true, "Candidate custom ID is required"],
             unique: true,
             trim: true,
             index: true,
@@ -139,6 +167,11 @@ const candidateSchema = new Schema<ICandidate>(
             required: [true, "Headline is required"],
             trim: true,
         },
+        summary: {
+            type: String,
+            trim: true,
+            default: "",
+        },
         email: {
             type: String,
             required: [true, "Email address is required"],
@@ -150,32 +183,41 @@ const candidateSchema = new Schema<ICandidate>(
         phone: {
             type: String,
             trim: true,
+            default: "",
         },
         location: {
             type: String,
-            required: true,
+            required: [true, "Location is required"],
             trim: true,
             index: true,
         },
         status: {
             type: String,
-            enum: CANDIDATE_STATUSES,
+            enum: {
+                values: CANDIDATE_STATUSES,
+                message: "{VALUE} is not a valid candidate status",
+            },
             default: "Active",
             index: true,
         },
         statusReason: {
             type: String,
             trim: true,
+            default: "",
         },
         completion: {
             type: Number,
             default: 0,
-            min: 0,
-            max: 100,
+            min: [0, "Completion percentage cannot be less than 0"],
+            max: [100, "Completion percentage cannot exceed 100"],
             index: true,
         },
         source: {
             type: String,
+            enum: {
+                values: CANDIDATE_SOURCES,
+                message: "{VALUE} is not a valid candidate source",
+            },
             default: "Google",
             index: true,
         },
@@ -202,6 +244,7 @@ const candidateSchema = new Schema<ICandidate>(
         recruiterViewsCount: {
             type: Number,
             default: 0,
+            min: 0,
         },
         skills: {
             type: [String],
@@ -209,10 +252,10 @@ const candidateSchema = new Schema<ICandidate>(
             index: true,
         },
         socialLinks: {
-            linkedin: { type: String, trim: true },
-            portfolio: { type: String, trim: true },
-            github: { type: String, trim: true },
-            twitter: { type: String, trim: true },
+            linkedin: { type: String, trim: true, default: "" },
+            portfolio: { type: String, trim: true, default: "" },
+            github: { type: String, trim: true, default: "" },
+            twitter: { type: String, trim: true, default: "" },
         },
         experience: [
             {
@@ -251,9 +294,10 @@ const candidateSchema = new Schema<ICandidate>(
         },
         consentRecords: [
             {
+                customId: { type: String },
                 purpose: { type: String, required: true },
                 version: { type: String, required: true },
-                consentedAt: { type: Date, default: Date.now },
+                consentedAt: { type: Schema.Types.Mixed, default: Date.now },
                 ipAddress: { type: String, default: "" },
                 status: { type: String, enum: ["Granted", "Revoked"], default: "Granted" },
             },
@@ -279,7 +323,7 @@ const candidateSchema = new Schema<ICandidate>(
                 templateId: { type: String },
                 templateName: { type: String },
                 isDefault: { type: Boolean, default: false },
-                summary: { type: String },
+                summary: { type: String, default: "" },
                 atsValidated: { type: Boolean, default: false },
             },
         ],
@@ -290,6 +334,23 @@ const candidateSchema = new Schema<ICandidate>(
                 authorAdminId: { type: String },
                 note: { type: String, required: true },
                 createdAt: { type: Schema.Types.Mixed, default: Date.now },
+            },
+        ],
+        linkedOAuthAccounts: [
+            {
+                provider: { type: String, required: true },
+                email: { type: String, required: true },
+                linkedAt: { type: Schema.Types.Mixed, default: Date.now },
+                status: { type: String, default: "Connected" },
+            },
+        ],
+        loginHistory: [
+            {
+                id: { type: String },
+                timestamp: { type: Schema.Types.Mixed, default: Date.now },
+                ipAddress: { type: String, default: "" },
+                device: { type: String, default: "" },
+                location: { type: String, default: "" },
             },
         ],
         savedJobIds: {
@@ -307,38 +368,52 @@ const candidateSchema = new Schema<ICandidate>(
     }
 );
 
-// Compound text index for global search across name, headline, skills, location
-candidateSchema.index({
-    name: "text",
-    headline: "text",
-    skills: "text",
-    location: "text",
-});
+// Indexes for directory searches, filtering and sorting
+candidateSchema.index({ name: 1, email: 1, customId: 1 });
+candidateSchema.index({ createdAt: -1 });
 
+/**
+ * DPDP-safe email masking: aarav.mehta@example.com -> aa***@example.com
+ */
 export function maskEmail(email: string): string {
-    if (!email) return "";
-    const parts = email.split("@");
-    if (parts.length < 2) return "***";
-    const user = parts[0];
-    const domain = parts[1];
-    const prefix = user.length > 2 ? user.slice(0, 2) : user.slice(0, 1);
+    if (!email || typeof email !== "string") return "***";
+    const trimmed = email.trim();
+    const atIndex = trimmed.indexOf("@");
+    if (atIndex <= 0) return "***";
+    const user = trimmed.slice(0, atIndex);
+    const domain = trimmed.slice(atIndex + 1);
+    const visiblePrefixLength = user.length > 2 ? 2 : 1;
+    const prefix = user.slice(0, visiblePrefixLength);
     return `${prefix}***@${domain}`;
 }
 
+/**
+ * DPDP-safe phone masking: +91 9876543210 -> +91 98765 *****
+ */
 export function maskPhone(phone?: string): string {
-    if (!phone) return "";
+    if (!phone || typeof phone !== "string") return "";
     const clean = phone.trim();
     if (clean.length < 5) return "***";
-    const prefix = clean.slice(0, 8);
-    return `${prefix} *****`;
+    // Preserve prefix such as country code + first 5-6 digits
+    const visiblePart = clean.slice(0, Math.min(8, clean.length - 4));
+    return `${visiblePart} *****`;
 }
 
+/**
+ * Redact sensitive PII from candidate document for safe API serialization
+ */
 candidateSchema.methods.toMaskedJSON = function (): Record<string, any> {
     const obj = this.toObject();
     obj.emailMasked = maskEmail(obj.email);
     obj.phoneMasked = maskPhone(obj.phone);
     delete obj.email;
     delete obj.phone;
+    if (Array.isArray(obj.resumes)) {
+        obj.resumes = obj.resumes.map((r: any) => ({
+            ...r,
+            url: "[Protected - Requires DPDP Justification]",
+        }));
+    }
     return obj;
 };
 

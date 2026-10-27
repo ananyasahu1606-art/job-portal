@@ -9,7 +9,9 @@ import { seedCandidates } from "./seeds/candidateSeed";
 dotenv.config();
 
 connectDB().then(() => {
-    seedCandidates().catch((err) => console.error("Candidate seed error:", err));
+    if (process.env.NODE_ENV !== "production") {
+        seedCandidates().catch((err) => console.error("Candidate seed error:", err));
+    }
 });
 
 const app = express();
